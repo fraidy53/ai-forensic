@@ -25,7 +25,20 @@ def enrich_with_forgery(response: Any, video_path: Path, worker_cfg: Any) -> Any
         work_root = Path(worker_cfg.work_dir) / "forgery_lane"
         work_root.mkdir(parents=True, exist_ok=True)
         release_deepfake_gpu_memory()
-        forgery = run_forgery_modules(video_path, worker_cfg, work_dir=work_root)
+        # Overlay bake looks for work/trufor/{evidenceId}_{analysisRequestId} NPZs.
+        # Soft TruFor no longer writes there when FORGERY_ENABLED=1 (R1), so persist
+        # forgery-lane artifacts before the temp dir is deleted.
+        persist_to = None
+        eid = getattr(response, "evidenceId", None)
+        aid = getattr(response, "analysisRequestId", None)
+        if eid is not None and aid is not None:
+            persist_to = Path(worker_cfg.work_dir) / "trufor" / f"{int(eid)}_{int(aid)}"
+        forgery = run_forgery_modules(
+            video_path,
+            worker_cfg,
+            work_dir=work_root,
+            persist_trufor_to=persist_to,
+        )
         return merge_forgery_into_response(response, forgery, worker_cfg=worker_cfg)
     except Exception:
         logger.exception("Forgery lane failed for %s; returning deepfake-only response", video_path)
