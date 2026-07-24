@@ -6,6 +6,11 @@ sleep 2
 source /home/sk4team/forenShield-ai/.venv/bin/activate
 set -a
 source /home/sk4team/forenShield-ai/config/env.local
+# Forgery/TruFor ckpt + thresholds live here — env.local alone is not enough (T5).
+if [[ -f /home/sk4team/ai-forensic/gpu_worker/.env ]]; then
+  # shellcheck disable=SC1091
+  source /home/sk4team/ai-forensic/gpu_worker/.env
+fi
 set +a
 unset AWS_PROFILE
 export INFERENCE_MODE=local_model
@@ -20,3 +25,7 @@ sleep 4
 curl -sf http://127.0.0.1:8000/health
 echo
 pgrep -af "uvicorn app.main_gateway" | head -1
+# Overlay worker is killed above — remind ops to restart Method B overlay separately.
+if ! pgrep -f 'gpu_worker.rabbitmq_worker' >/dev/null; then
+  echo "WARN: overlay worker not running — re-run sync-gpu-rabbitmq.ps1 or /tmp/start_overlay_worker_method_b.sh"
+fi
