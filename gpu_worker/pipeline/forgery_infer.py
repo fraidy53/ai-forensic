@@ -128,11 +128,9 @@ def _resolve_path(env_value: str, default: Path) -> Path:
 
 
 def _setup_forgery_imports(repo_root: Path, forgery_root: Path) -> None:
-    # Prefer GPU layout (forgery/scripts/infer), then git layout (scripts/forgery/infer).
     for cand in (
         forgery_root / "scripts" / "infer",
         repo_root / "forgery" / "scripts" / "infer",
-        repo_root / "scripts" / "forgery" / "infer",
         repo_root / "scripts" / "infer",
     ):
         if cand.is_dir() and str(cand) not in sys.path:
@@ -825,7 +823,34 @@ def infer_timesformer_temporal(
     return round(float(score), 6), clip_risks, temporal_segments, meta
 
 
-def run_forgery_modules(video_path: Path, worker_cfg: Any, *, work_dir: Path | None = None) -> ForgeryLaneResult:
+def _persist_trufor_artifacts_for_overlay(spatial_work: Path, dest: Path) -> None:
+    """Keep JPG+NPZ under work/trufor/{eid}_{aid} for on-demand overlay bake.
+
+    R1 skips soft TruFor, so without this persist the forgery-lane tmp dir is
+    deleted and overlay falls back to sparse API bboxes (looks like an old overlay).
+    """
+    frames = spatial_work / "trufor_frames"
+    out = spatial_work / "trufor_out"
+    if not out.is_dir() or not any(out.rglob("*.npz")):
+        logger.warning("TruFor overlay persist skipped; no NPZ under %s", out)
+        return
+    if dest.exists():
+        shutil.rmtree(dest, ignore_errors=True)
+    dest.mkdir(parents=True, exist_ok=True)
+    if frames.is_dir():
+        shutil.copytree(frames, dest / "trufor_frames", dirs_exist_ok=True)
+    shutil.copytree(out, dest / "trufor_out", dirs_exist_ok=True)
+    n_npz = sum(1 for _ in dest.rglob("*.npz"))
+    logger.info("Persisted TruFor artifacts for overlay bake: dest=%s npz=%d", dest, n_npz)
+
+
+def run_forgery_modules(
+    video_path: Path,
+    worker_cfg: Any,
+    *,
+    work_dir: Path | None = None,
+    persist_trufor_to: Path | None = None,
+) -> ForgeryLaneResult:
     cfg = ForgeryInferConfig.from_worker_config(worker_cfg)
     if not cfg.enabled:
         logger.info("Forgery lane disabled (FORGERY_ENABLED=0)")
@@ -848,6 +873,11 @@ def run_forgery_modules(video_path: Path, worker_cfg: Any, *, work_dir: Path | N
         temporal_score, clip_risks, temporal_segments, tmeta = infer_timesformer_temporal(
             video_path, temporal_work, cfg
         )
+        if persist_trufor_to is not None:
+            try:
+                _persist_trufor_artifacts_for_overlay(spatial_work, persist_trufor_to)
+            except Exception:
+                logger.exception("Failed to persist TruFor artifacts to %s", persist_trufor_to)
         return ForgeryLaneResult(
             lane_ran=True,
             spatial_score=spatial_score,
@@ -861,6 +891,4 @@ def run_forgery_modules(video_path: Path, worker_cfg: Any, *, work_dir: Path | N
             model_temporal_version=cfg.timesformer_ckpt.parent.name if cfg.timesformer_ckpt else "v1.8-csvted-v4",
         )
     finally:
-        import shutil
-
         shutil.rmtree(tmp, ignore_errors=True)
