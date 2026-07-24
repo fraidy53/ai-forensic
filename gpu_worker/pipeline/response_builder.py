@@ -615,6 +615,7 @@ def build_analysis_response(
     module_timelines = _build_module_timelines(modules, fusion_config)
     # R1: skip soft TruFor when forgery lane owns TruFor (avoids dual run / cost / score drift).
     if _forgery_lane_enabled():
+        forgery = None
         _report_progress(on_progress, 90, "대표 프레임 생성 중")
         forgery_note = _forgery_continuation_note(None, deferred_to_lane=True)
         fusion = FusionResult(
